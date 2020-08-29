@@ -2,33 +2,65 @@ module Main where
 
 import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
--- accepted lisp symbols
-symbol :: Parser Char
-symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
-
-data LispVal = Atom String
-             | List [LispVal]
-             | DottedList [LispVal] LispVal
-             | Number Integer
-             | String String
-             | Bool Bool
-
--- read in the string and check if it is valid
--- `>>` binding is different with every monad
--- with Parsec, the parser parses and return its result
--- and passes the remaining string to the test parser
-readExpr :: String -> String
-readExpr input = case parse (spaces >> symbol) "lisp" input of
-  Left  err -> "No match: " ++ show err
-  Right val -> "Found value"
-
--- recognize and skip one or more space
-spaces :: Parser ()
-spaces = skipMany1 space
+import           System.Environment
 
 main :: IO ()
 main = do
-  s <- getLine
-  putStrLn $ readExpr s
+  args <- getArgs
+  putStrLn $ readExpr $ head args
+
+-- | Check if the give string is a valid expression
+readExpr :: String -> String
+readExpr input = case parse parseExpr "lisp" input of
+  Left  err -> "No match: " ++ show err
+  Right val -> "Found value " ++ show val
 
 
+-- | Parse a lisp symbol
+symbol :: Parser Char
+symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
+
+-- | Parse one or more spaces
+spaces :: Parser ()
+spaces = skipMany1 space
+
+-- | Lisp grammar
+data LispVal = Atom String
+             | String String
+             | Number Integer
+             | Bool Bool
+             | List [LispVal]
+             | DottedList [LispVal] LispVal
+             deriving (Eq, Show)
+
+-- | Parse a lisp expression
+parseExpr :: Parser LispVal
+parseExpr = parseAtom <|> parseString <|> parseNumber
+
+-- | Parse a lisp string
+--
+-- A string begins with a double quote mark, followed by any number of
+-- non-quote character, and ends with a double quote mark
+parseString :: Parser LispVal
+parseString = do
+  char '"'
+  v <- many $ noneOf "\""
+  char '"'
+  return $ String v
+
+-- | Parse a lisp atom
+--
+-- An atom is a letter or symbol, followed by any number of
+-- letters, digits, or symbols
+parseAtom :: Parser LispVal
+parseAtom = do
+  x  <- letter <|> symbol
+  xs <- many $ letter <|> symbol <|> digit
+  return $ case x : xs of
+    "#t" -> Bool True
+    "#f" -> Bool False
+    atom -> Atom atom
+
+-- | Parse a lisp number
+parseNumber :: Parser LispVal
+parseNumber = Number . read <$> many1 digit
