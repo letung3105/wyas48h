@@ -6,8 +6,8 @@ import           System.Environment
 
 main :: IO ()
 main = do
-  args <- getArgs
-  putStrLn $ readExpr $ head args
+  expr <- getLine
+  putStrLn $ readExpr expr
 
 -- | Check if the give string is a valid expression
 readExpr :: String -> String
@@ -44,9 +44,20 @@ parseExpr = parseAtom <|> parseString <|> parseNumber
 parseString :: Parser LispVal
 parseString = do
   char '"'
-  v <- many $ noneOf "\""
+  v <- many $ escapedChar <|> noneOf "\""
   char '"'
   return $ String v
+
+escapedChar :: Parser Char
+escapedChar = do
+  char '\\'
+  esc <- oneOf "\\\"nrt"
+  return $ case esc of
+    '\\' -> '\\'
+    '"'  -> '"'
+    'n'  -> '\n'
+    'r'  -> '\r'
+    't'  -> '\t'
 
 -- | Parse a lisp atom
 --
