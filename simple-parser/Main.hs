@@ -3,8 +3,8 @@ module Main where
 import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
 import           System.Environment
-import           Numeric
 import           Data.Char
+import           Numeric
 
 main :: IO ()
 main = do
@@ -14,6 +14,11 @@ main = do
 -- | Check if the give string is a valid expression
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
+  Left  err -> "No match: " ++ show err
+  Right val -> "Found value " ++ show val
+
+run :: Show a => Parser a -> String -> String
+run parser input = case parse parser "lisp" input of
   Left  err -> "No match: " ++ show err
   Right val -> "Found value " ++ show val
 
@@ -28,16 +33,16 @@ spaces = skipMany1 space
 
 -- | Lisp grammar
 data LispVal = Atom String
-             | String String
-             | Number Integer
-             | Bool Bool
              | List [LispVal]
              | DottedList [LispVal] LispVal
+             | Number Integer
+             | String String
+             | Bool Bool
              deriving (Eq, Show)
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
-parseExpr = parseNumber <|> parseString <|> parseAtom
+parseExpr = parseBool <|> parseString <|> parseNumber <|> parseAtom
 
 -- | Parse a lisp atom
 --
@@ -47,10 +52,14 @@ parseAtom :: Parser LispVal
 parseAtom = do
   x  <- letter <|> symbol
   xs <- many $ letter <|> symbol <|> digit
-  return $ case x : xs of
+  return $ Atom (x : xs)
+
+parseBool :: Parser LispVal
+parseBool = do
+  v <- string "#t" <|> string "#f"
+  return $ case v of
     "#t" -> Bool True
     "#f" -> Bool False
-    atom -> Atom atom
 
 -- | Parse a lisp string
 --
@@ -67,32 +76,24 @@ parseString = do
 escapedChar :: Parser Char
 escapedChar = do
   char '\\'
-  esc <- oneOf "\\\"nrt"
-  return $ case esc of
-    '\\' -> '\\'
-    '"'  -> '"'
-    'n'  -> '\n'
-    'r'  -> '\r'
-    't'  -> '\t'
+  oneOf "\\\"nrt"
 
 -- | Parse a lisp number
 parseNumber :: Parser LispVal
-parseNumber = withRadix <|> decLiteral
+parseNumber = parseNumberWithRadix <|> parseDecimal
 
--- | Parse number literals that are represented in other bases
-withRadix :: Parser LispVal
-withRadix = do
-  char '#'
-  radix <- oneOf "bodx"
+parseNumberWithRadix :: Parser LispVal
+parseNumberWithRadix = do
+  radix <- string "#o" <|> string "#b" <|> string "#d" <|> string "#x"
   case radix of
-    'b' -> binLiteral
-    'o' -> octLiteral
-    'd' -> decLiteral
-    'x' -> hexLiteral
+    "#b" -> parseBinary
+    "#o" -> parseOctal
+    "#d" -> parseDecimal
+    "#x" -> parseHexadecimal
 
 -- | Parse a number represented in binary
-binLiteral :: Parser LispVal
-binLiteral = do
+parseBinary :: Parser LispVal
+parseBinary = do
   ns <- many1 $ oneOf "01"
   return $ Number $ binToInt ns
  where
@@ -102,23 +103,22 @@ binLiteral = do
     where ln = length ns
 
 -- | Parse a number represented in octal
-octLiteral :: Parser LispVal
-octLiteral = do
+parseOctal :: Parser LispVal
+parseOctal = do
   ns <- many1 octDigit
   case readOct ns of -- there should be no error
     [(n, _)] -> return $ Number n
 
 -- | Parse a number represented in decimal
-decLiteral :: Parser LispVal
-decLiteral = do
+parseDecimal :: Parser LispVal
+parseDecimal = do
   ns <- many1 digit
   case readDec ns of -- there should be no error
     [(n, _)] -> return $ Number n
 
 -- | Parse a number represented in hexadecimal
-hexLiteral :: Parser LispVal
-hexLiteral = do
+parseHexadecimal :: Parser LispVal
+parseHexadecimal = do
   ns <- many1 hexDigit
   case readHex ns of -- there should be no error
     [(n, _)] -> return $ Number n
-
