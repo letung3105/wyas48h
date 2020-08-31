@@ -1,10 +1,10 @@
 module Main where
 
-import           Text.ParserCombinators.Parsec
-                                         hiding ( spaces )
-import           System.Environment
 import           Data.Char
 import           Numeric
+import           System.Environment
+import           Text.ParserCombinators.Parsec
+                                         hiding ( spaces )
 
 main :: IO ()
 main = do
@@ -22,27 +22,30 @@ run parser input = case parse parser "lisp" input of
   Left  err -> "No match: " ++ show err
   Right val -> "Found value " ++ show val
 
+-- -- | Parse a lisp symbol
+-- symbol :: Parser Char
+-- symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
 
--- | Parse a lisp symbol
-symbol :: Parser Char
-symbol = oneOf "!$%&|*+-/:<=?>@^_~#"
+extendedAlphabet :: Parser Char
+extendedAlphabet = oneOf "!$%&*+-./:<=>?@^_~"
 
 -- | Parse one or more spaces
 spaces :: Parser ()
 spaces = skipMany1 space
 
 -- | Lisp grammar
-data LispVal = Atom String
-             | List [LispVal]
-             | DottedList [LispVal] LispVal
-             | Number Integer
-             | String String
-             | Bool Bool
-             deriving (Eq, Show)
+data LispVal
+  = Atom String
+  | List [LispVal]
+  | DottedList [LispVal] LispVal
+  | Number Integer
+  | String String
+  | Bool Bool
+  deriving (Eq, Show)
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
-parseExpr = parseBool <|> parseString <|> parseNumber <|> parseAtom
+parseExpr = parseAtom <|> parseNumber <|> parseString
 
 -- | Parse a lisp atom
 --
@@ -50,16 +53,9 @@ parseExpr = parseBool <|> parseString <|> parseNumber <|> parseAtom
 -- letters, digits, or symbols
 parseAtom :: Parser LispVal
 parseAtom = do
-  x  <- letter <|> symbol
-  xs <- many $ letter <|> symbol <|> digit
+  x  <- letter <|> extendedAlphabet
+  xs <- many $ letter <|> extendedAlphabet <|> digit
   return $ Atom (x : xs)
-
-parseBool :: Parser LispVal
-parseBool = do
-  v <- string "#t" <|> string "#f"
-  return $ case v of
-    "#t" -> Bool True
-    "#f" -> Bool False
 
 -- | Parse a lisp string
 --
@@ -80,27 +76,33 @@ escapedChar = do
 
 -- | Parse a lisp number
 parseNumber :: Parser LispVal
-parseNumber = parseNumberWithRadix <|> parseDecimal
+parseNumber = parseHashtagPrefix <|> parseDecimal
 
-parseNumberWithRadix :: Parser LispVal
-parseNumberWithRadix = do
-  radix <- string "#o" <|> string "#b" <|> string "#d" <|> string "#x"
-  case radix of
-    "#b" -> parseBinary
-    "#o" -> parseOctal
-    "#d" -> parseDecimal
-    "#x" -> parseHexadecimal
+-- | Parse stuffs with `#`
+-- NOTE: this is a hack
+parseHashtagPrefix :: Parser LispVal
+parseHashtagPrefix = do
+  char '#'
+  v <- oneOf "tfbodx"
+  case v of
+    't' -> return $ Bool True
+    'f' -> return $ Bool False
+    'b' -> parseBinary
+    'o' -> parseOctal
+    'd' -> parseDecimal
+    'x' -> parseHexadecimal
 
 -- | Parse a number represented in binary
 parseBinary :: Parser LispVal
 parseBinary = do
   ns <- many1 $ oneOf "01"
-  return $ Number $ binToInt ns
+  return $ Number $ foldl f 0 $ zip [0 ..] $ binToDigits ns
  where
-  binToInt :: String -> Integer
-  binToInt ns = toInteger $ sum
-    [ bit * 2 ^ i | (bit, i) <- zip (map digitToInt ns) [ln - 1, ln - 2 ..] ]
-    where ln = length ns
+  f :: Integer -> (Integer, Integer) -> Integer
+  f sum (pos, bit) = sum + bit * 2 ^ pos
+
+  binToDigits :: String -> [Integer]
+  binToDigits ns = map (toInteger . digitToInt) ns
 
 -- | Parse a number represented in octal
 parseOctal :: Parser LispVal
