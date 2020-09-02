@@ -17,17 +17,9 @@ readExpr input = case parse parseExpr "lisp" input of
   Left  err -> "No match: " ++ show err
   Right val -> "Found value " ++ show val
 
-run :: Show a => Parser a -> String -> String
-run parser input = case parse parser "lisp" input of
-  Left  err -> "No match: " ++ show err
-  Right val -> "Found value " ++ show val
-
--- -- | Parse a lisp symbol
--- symbol :: Parser Char
--- symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
-
-extendedAlphabet :: Parser Char
-extendedAlphabet = oneOf "!$%&*+-./:<=>?@^_~"
+-- | Parse a lisp symbol
+symbol :: Parser Char
+symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
 
 -- | Parse one or more spaces
 spaces :: Parser ()
@@ -45,20 +37,35 @@ data LispVal
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
-parseExpr = parseAtom <|> parseNumber <|> parseString
+parseExpr =
+  try parseAtom <|> try parseBool <|> parseNumber <|> parseString <|> do
+    char '('
+    x <- try parseList <|> parseDottedList
+    char ')'
+    return x
 
--- | Parse a lisp atom
---
+-- | Parse a lisp identifier
 -- An atom is a letter or symbol, followed by any number of
 -- letters, digits, or symbols
 parseAtom :: Parser LispVal
 parseAtom = do
-  x  <- letter <|> extendedAlphabet
-  xs <- many $ letter <|> extendedAlphabet <|> digit
-  return $ Atom (x : xs)
+  x <- letter <|> symbol
+  case x of
+    '#' -> pzero
+    _   -> do
+      xs <- many $ letter <|> symbol <|> digit
+      return $ Atom $ x : xs
+
+-- | Parse a lisp boolean
+parseBool :: Parser LispVal
+parseBool = do
+  char '#'
+  r <- oneOf "tf"
+  return $ case r of
+    't' -> Bool True
+    'f' -> Bool False
 
 -- | Parse a lisp string
---
 -- A string begins with a double quote mark, followed by any number of
 -- non-quote character, and ends with a double quote mark
 parseString :: Parser LispVal
@@ -76,17 +83,13 @@ escapedChar = do
 
 -- | Parse a lisp number
 parseNumber :: Parser LispVal
-parseNumber = parseHashtagPrefix <|> parseDecimal
+parseNumber = parseWithRadix <|> parseDecimal
 
--- | Parse stuffs with `#`
--- NOTE: this is a hack
-parseHashtagPrefix :: Parser LispVal
-parseHashtagPrefix = do
+parseWithRadix :: Parser LispVal
+parseWithRadix = do
   char '#'
-  v <- oneOf "tfbodx"
-  case v of
-    't' -> return $ Bool True
-    'f' -> return $ Bool False
+  r <- oneOf "bodx"
+  case r of
     'b' -> parseBinary
     'o' -> parseOctal
     'd' -> parseDecimal
@@ -124,3 +127,18 @@ parseHexadecimal = do
   ns <- many1 hexDigit
   case readHex ns of -- there should be no error
     [(n, _)] -> return $ Number n
+
+parseQuote :: Parser LispVal
+parseQuote = do
+  char '\''
+  x <- parseExpr
+  return $ List [Atom "quote", x]
+
+parseList :: Parser LispVal
+parseList = List <$> sepBy parseExpr spaces
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+  head <- endBy parseExpr spaces -- endBy = seperated and ended with
+  tail <- char '.' >> spaces >> parseExpr
+  return $ DottedList head tail
