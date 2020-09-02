@@ -7,23 +7,13 @@ import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
 
 main :: IO ()
-main = do
-  expr <- getLine
-  putStrLn $ readExpr expr
+main = getArgs >>= print . eval . readExpr . head
 
 -- | Check if the give string is a valid expression
-readExpr :: String -> String
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left  err -> "No match: " ++ show err
-  Right val -> "Found " ++ show val
-
--- | Parse a lisp symbol
-symbol :: Parser Char
-symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
-
--- | Parse one or more spaces
-spaces :: Parser ()
-spaces = skipMany1 space
+  Left  err -> String $ "No match: " ++ show err
+  Right val -> val
 
 -- | Lisp grammar
 data LispVal
@@ -37,7 +27,38 @@ data LispVal
   deriving (Eq)
 
 instance Show LispVal where
-  show = showVal
+  show (Atom   a) = a
+  show (Number n) = show n
+  show (String s) = "\"" ++ s ++ "\""
+  show (Bool   b) = if b then "#t" else "#f"
+  show (Char   c) = case c of
+    ' '  -> "#\\space"
+    '\n' -> "#\\newline"
+    _    -> "#\\" ++ [c]
+  show (List l        ) = "(" ++ unwordsList l ++ ")"
+  show (DottedList h t) = "(" ++ unwordsList h ++ "." ++ show t ++ ")"
+
+-- | Parse a lisp symbol
+symbol :: Parser Char
+symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
+
+-- | Parse one or more spaces
+spaces :: Parser ()
+spaces = skipMany1 space
+
+-- | Parse escaped character sequence in a string
+escapedChar :: Parser Char
+escapedChar = do
+  char '\\'
+  oneOf "\\\"nrt"
+
+readBinary :: (Eq a, Num a) => ReadS a
+readBinary s = 
+  map (toInteger . digitToInt) ns
+
+-- | Turn a list of lisp values into a string where each of the value is seperated by a space
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map show
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
@@ -47,6 +68,7 @@ parseExpr =
     <|> try parseNumber
     <|> parseChar
     <|> parseString
+    <|> parseQuoted
     <|> do
           char '('
           x <- try parseList <|> parseDottedList
@@ -83,12 +105,6 @@ parseString = do
   v <- many $ escapedChar <|> noneOf "\""
   char '"'
   return $ String v
-
--- | Parse escaped character sequence in a string
-escapedChar :: Parser Char
-escapedChar = do
-  char '\\'
-  oneOf "\\\"nrt"
 
 -- | Parse a lisp number
 parseNumber :: Parser LispVal
@@ -137,21 +153,25 @@ parseHexadecimal = do
   case readHex ns of -- there should be no error
     [(n, _)] -> return $ Number n
 
-parseQuote :: Parser LispVal
-parseQuote = do
+-- | Parse lisp syntactic single quote
+parseQuoted :: Parser LispVal
+parseQuoted = do
   char '\''
   x <- parseExpr
   return $ List [Atom "quote", x]
 
+-- | Parse lisp list
 parseList :: Parser LispVal
 parseList = List <$> sepBy parseExpr spaces
 
+-- | Parse lisp dotted list
 parseDottedList :: Parser LispVal
 parseDottedList = do
   head <- endBy parseExpr spaces -- endBy = seperated and ended with
   tail <- char '.' >> spaces >> parseExpr
   return $ DottedList head tail
 
+-- | Parse lisp character
 parseChar :: Parser LispVal
 parseChar = do
   string "#\\"
@@ -166,17 +186,9 @@ parseChar = do
       "newline" -> return '\n'
       _         -> pzero
 
-showVal :: LispVal -> String
-showVal (Atom   a) = a
-showVal (Number n) = show n
-showVal (String s) = "\"" ++ s ++ "\""
-showVal (Bool   b) = if b then "#t" else "#f"
-showVal (Char   c) = case c of
-  ' '  -> "#\\space"
-  '\n' -> "#\\newline"
-  _    -> "#\\" ++ [c]
-showVal (List l        ) = "(" ++ unwordsList l ++ ")"
-showVal (DottedList h t) = "(" ++ unwordsList h ++ "." ++ show t ++ ")"
-
-unwordsList :: [LispVal] -> String
-unwordsList = unwords . map showVal
+-- | Evaluate lisp expression
+eval :: LispVal -> LispVal
+eval val@(String _                ) = val
+eval val@(Number _                ) = val
+eval val@(Bool   _                ) = val
+eval (    List   [Atom "quote", e]) = e
