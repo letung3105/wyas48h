@@ -15,7 +15,7 @@ main = do
 readExpr :: String -> String
 readExpr input = case parse parseExpr "lisp" input of
   Left  err -> "No match: " ++ show err
-  Right val -> "Found value " ++ show val
+  Right val -> "Found " ++ show val
 
 -- | Parse a lisp symbol
 symbol :: Parser Char
@@ -34,7 +34,10 @@ data LispVal
   | String String
   | Bool Bool
   | Char Char
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show LispVal where
+  show = showVal
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
@@ -163,4 +166,17 @@ parseChar = do
       "newline" -> return '\n'
       _         -> pzero
 
+showVal :: LispVal -> String
+showVal (Atom   a) = a
+showVal (Number n) = show n
+showVal (String s) = "\"" ++ s ++ "\""
+showVal (Bool   b) = if b then "#t" else "#f"
+showVal (Char   c) = case c of
+  ' '  -> "#\\space"
+  '\n' -> "#\\newline"
+  _    -> "#\\" ++ [c]
+showVal (List l        ) = "(" ++ unwordsList l ++ ")"
+showVal (DottedList h t) = "(" ++ unwordsList h ++ "." ++ show t ++ ")"
 
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
