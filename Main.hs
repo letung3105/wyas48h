@@ -33,16 +33,22 @@ data LispVal
   | Number Integer
   | String String
   | Bool Bool
+  | Char Char
   deriving (Eq, Show)
 
 -- | Parse a lisp expression
 parseExpr :: Parser LispVal
 parseExpr =
-  try parseAtom <|> try parseBool <|> parseNumber <|> parseString <|> do
-    char '('
-    x <- try parseList <|> parseDottedList
-    char ')'
-    return x
+  try parseAtom
+    <|> try parseBool
+    <|> try parseNumber
+    <|> parseChar
+    <|> parseString
+    <|> do
+          char '('
+          x <- try parseList <|> parseDottedList
+          char ')'
+          return x
 
 -- | Parse a lisp identifier
 -- An atom is a letter or symbol, followed by any number of
@@ -142,3 +148,19 @@ parseDottedList = do
   head <- endBy parseExpr spaces -- endBy = seperated and ended with
   tail <- char '.' >> spaces >> parseExpr
   return $ DottedList head tail
+
+parseChar :: Parser LispVal
+parseChar = do
+  string "#\\"
+  c <- try characterName <|> anyToken
+  return $ Char c
+ where
+  characterName :: Parser Char
+  characterName = do
+    name <- many1 letter
+    case map toLower name of
+      "space"   -> return ' '
+      "newline" -> return '\n'
+      _         -> pzero
+
+
