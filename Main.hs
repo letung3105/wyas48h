@@ -52,10 +52,6 @@ escapedChar = do
   char '\\'
   oneOf "\\\"nrt"
 
-readBinary :: (Eq a, Num a) => ReadS a
-readBinary s = 
-  map (toInteger . digitToInt) ns
-
 -- | Turn a list of lisp values into a string where each of the value is seperated by a space
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map show
@@ -188,7 +184,37 @@ parseChar = do
 
 -- | Evaluate lisp expression
 eval :: LispVal -> LispVal
-eval val@(String _                ) = val
-eval val@(Number _                ) = val
-eval val@(Bool   _                ) = val
-eval (    List   [Atom "quote", e]) = e
+eval val@(String _                 ) = val
+eval val@(Number _                 ) = val
+eval val@(Bool   _                 ) = val
+eval (    List   [Atom "quote", e] ) = e
+eval (    List   (Atom func : args)) = apply func $ map eval args
+
+-- | Apply the operand to the list of lisp values,
+-- returns `Bool False` if there is an error
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (Bool False) ($ args) (lookup func primitives)
+
+-- | List of primitives operands
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives =
+  [ ("+"        , numericBinop (+))
+  , ("-"        , numericBinop (-))
+  , ("*"        , numericBinop (*))
+  , ("/"        , numericBinop div)
+  , ("mod"      , numericBinop mod)
+  , ("quotient" , numericBinop quot)
+  , ("remainder", numericBinop rem)
+  ]
+
+-- | Combine the list of numeric lisp values, with the given operator, into a single numeric lisp value
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+-- | Attempt to get the value inside a lisp value
+unpackNum :: LispVal -> Integer
+unpackNum (Number n) = n
+unpackNum (String n) =
+  let parsed = reads n in if null parsed then 0 else fst $ head parsed
+unpackNum (List [n]) = unpackNum n
+unpackNum _          = 0
