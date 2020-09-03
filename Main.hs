@@ -1,19 +1,26 @@
 module Main where
 
 import           Data.Char
+import           Exception               hiding ( try )
 import           Numeric
 import           System.Environment
 import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
 
 main :: IO ()
-main = getArgs >>= print . eval . readExpr . head
+-- main = undefined
+main = do
+  expr <- getLine
+  let v = fmap show (readExpr expr >>= eval)
+  case v of
+    Left  err  -> print err
+    Right expr -> print expr
 
 -- | Check if the give string is a valid expression
-readExpr :: String -> LispVal
+readExpr :: String -> LispResult LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left  err -> String $ "No match: " ++ show err
-  Right val -> val
+  Left  err -> throw $ Parser err
+  Right val -> return val
 
 -- | Lisp grammar
 data LispVal
@@ -27,16 +34,16 @@ data LispVal
   deriving (Eq)
 
 instance Show LispVal where
-  show (Atom   a) = a
-  show (Number n) = show n
-  show (String s) = "\"" ++ s ++ "\""
-  show (Bool   b) = if b then "#t" else "#f"
-  show (Char   c) = case c of
+  show (Atom a        ) = a
+  show (List l        ) = "(" ++ unwordsList l ++ ")"
+  show (DottedList h t) = "(" ++ unwordsList h ++ "." ++ show t ++ ")"
+  show (Number n      ) = show n
+  show (String s      ) = "\"" ++ s ++ "\""
+  show (Bool   b      ) = if b then "#t" else "#f"
+  show (Char   c      ) = case c of
     ' '  -> "#\\space"
     '\n' -> "#\\newline"
     _    -> "#\\" ++ [c]
-  show (List l        ) = "(" ++ unwordsList l ++ ")"
-  show (DottedList h t) = "(" ++ unwordsList h ++ "." ++ show t ++ ")"
 
 -- | Parse a lisp symbol
 symbol :: Parser Char
@@ -183,20 +190,24 @@ parseChar = do
       _         -> pzero
 
 -- | Evaluate lisp expression
-eval :: LispVal -> LispVal
-eval val@(String _                 ) = val
-eval val@(Number _                 ) = val
-eval val@(Bool   _                 ) = val
-eval (    List   [Atom "quote", e] ) = e
-eval (    List   (Atom func : args)) = apply func $ map eval args
+eval :: LispVal -> LispResult LispVal
+eval v@(String _                 ) = return v
+eval v@(Number _                 ) = return v
+eval v@(Bool   _                 ) = return v
+eval (  List   [Atom "quote", e] ) = return e
+eval (  List   (Atom func : args)) = mapM eval args >>= apply func
+eval badForm = throw $ BadSpecialForm "Unrecognized special form" badForm
 
 -- | Apply the operand to the list of lisp values,
 -- returns `Bool False` if there is an error
-apply :: String -> [LispVal] -> LispVal
-apply func args = maybe (Bool False) ($ args) (lookup func primitives)
+apply :: String -> [LispVal] -> LispResult LispVal
+apply func args = maybe
+  (throw $ NotFunction "Unrecognized primitive function" func)
+  ($ args)
+  (lookup func primitives)
 
 -- | List of primitives operands
-primitives :: [(String, [LispVal] -> LispVal)]
+primitives :: [(String, [LispVal] -> LispResult LispVal)]
 primitives =
   [ ("+"        , numericBinop (+))
   , ("-"        , numericBinop (-))
@@ -208,13 +219,48 @@ primitives =
   ]
 
 -- | Combine the list of numeric lisp values, with the given operator, into a single numeric lisp value
-numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
-numericBinop op params = Number $ foldl1 op $ map unpackNum params
+numericBinop
+  :: (Integer -> Integer -> Integer) -> [LispVal] -> LispResult LispVal
+numericBinop _  [e]    = throw $ NumArgs 2 [e]
+numericBinop op params = Number . foldl1 op <$> mapM unpackNum params
 
 -- | Attempt to get the value inside a lisp value
-unpackNum :: LispVal -> Integer
-unpackNum (Number n) = n
+unpackNum :: LispVal -> LispResult Integer
+unpackNum (Number n) = return n
 unpackNum (String n) =
-  let parsed = reads n in if null parsed then 0 else fst $ head parsed
+  let parsed = reads n
+  in  if null parsed
+        then throw $ TypeMismatch "number" (String n)
+        else return $ fst $ head parsed
 unpackNum (List [n]) = unpackNum n
-unpackNum _          = 0
+unpackNum notNum     = throw $ TypeMismatch "number" notNum
+
+
+-- | Possible errors when parsing lisp
+data LispException
+    = Default String
+    | Parser ParseError
+    | BadSpecialForm String LispVal
+    | NotFunction String String
+    | UnboundVar String String
+    | NumArgs Integer [LispVal]
+    | TypeMismatch String LispVal
+
+instance Show LispException where
+  show (Default msg            ) = msg
+  show (Parser  paserErr       ) = "Parse error at " ++ show paserErr
+  show (BadSpecialForm msg form) = msg ++ ": " ++ show form
+  show (NotFunction    msg func) = msg ++ ": " ++ show func
+  show (UnboundVar     msg name) = msg ++ ": " ++ show name
+  show (NumArgs expected found) =
+    "Expected " ++ show expected ++ " args: Found values " ++ unwordsList found
+  show (TypeMismatch expected found) =
+    "Invalid type: expected " ++ show expected ++ ", found " ++ show found
+
+instance Exception LispException
+
+type LispResult a = Either LispException a
+
+-- | Get the correct path of either, `Left` is intentionally ommitted
+extractValue :: LispResult a -> a
+extractValue (Right v) = v
