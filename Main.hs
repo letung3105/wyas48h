@@ -216,6 +216,18 @@ primitives =
   , ("mod"      , numericBinop mod)
   , ("quotient" , numericBinop quot)
   , ("remainder", numericBinop rem)
+  , ("="        , numBoolBinop (==))
+  , ("/="       , numBoolBinop (/=))
+  , ("<"        , numBoolBinop (<))
+  , (">"        , numBoolBinop (>))
+  , ("<="       , numBoolBinop (<=))
+  , (">="       , numBoolBinop (>=))
+  , ("&&"       , boolBoolBinop (&&))
+  , ("||"       , boolBoolBinop (||))
+  , ("string=?" , strBoolBinop (==))
+  , ("string?"  , strBoolBinop (>))
+  , ("string<=?", strBoolBinop (<=))
+  , ("string>=?", strBoolBinop (>=))
   ]
 
 -- | Combine the list of numeric lisp values, with the given operator, into a single numeric lisp value
@@ -223,6 +235,28 @@ numericBinop
   :: (Integer -> Integer -> Integer) -> [LispVal] -> LispResult LispVal
 numericBinop _  [e]    = throw $ NumArgs 2 [e]
 numericBinop op params = Number . foldl1 op <$> mapM unpackNum params
+
+numBoolBinop :: (Integer -> Integer -> Bool) -> [LispVal] -> LispResult LispVal
+numBoolBinop = boolBinop unpackNum
+
+boolBoolBinop :: (Bool -> Bool -> Bool) -> [LispVal] -> LispResult LispVal
+boolBoolBinop = boolBinop unpackBool
+
+strBoolBinop :: (String -> String -> Bool) -> [LispVal] -> LispResult LispVal
+strBoolBinop = boolBinop unpackString
+
+boolBinop
+  :: (LispVal -> LispResult a)
+  -> (a -> a -> Bool)
+  -> [LispVal]
+  -> LispResult LispVal
+boolBinop unpack op params = if length params /= 2
+  then throw $ NumArgs 2 params
+  else do
+    x <- unpack $ head params
+    y <- unpack $ params !! 1
+    return $ Bool $ op x y
+
 
 -- | Attempt to get the value inside a lisp value
 unpackNum :: LispVal -> LispResult Integer
@@ -235,6 +269,15 @@ unpackNum (String n) =
 unpackNum (List [n]) = unpackNum n
 unpackNum notNum     = throw $ TypeMismatch "number" notNum
 
+unpackBool :: LispVal -> LispResult Bool
+unpackBool (Bool b) = return b
+unpackBool notBool  = throw $ TypeMismatch "boolean" notBool
+
+unpackString :: LispVal -> LispResult String
+unpackString (String s) = return s
+unpackString (Number n) = return $ show n
+unpackString (Bool   b) = return $ show b
+unpackString notStr     = throw $ TypeMismatch "string" notStr
 
 -- | Possible errors when parsing lisp
 data LispException
